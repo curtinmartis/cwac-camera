@@ -237,6 +237,12 @@ public interface CameraHost extends Camera.AutoFocusCallback {
   boolean rotateBasedOnExif();
 
   /**
+   * Called when a picture has been taken, but before the picture is saved.
+   * This will be called on the main thread.
+   */
+  void pictureTaken();
+
+  /**
    * Called when a picture has been taken. This will be
    * called on a background thread.
    * 

@@ -167,6 +167,11 @@ public class SimpleCameraHost implements CameraHost {
   }
 
   @Override
+  public void pictureTaken() {
+      // no-op
+  }
+
+  @Override
   public void saveImage(Bitmap bitmap) {
     // no-op
   }

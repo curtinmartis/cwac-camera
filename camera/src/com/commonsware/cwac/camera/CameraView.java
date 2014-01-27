@@ -30,8 +30,10 @@ import android.view.OrientationEventListener;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
-import java.io.IOException;
+
 import com.commonsware.cwac.camera.CameraHost.FailureReason;
+
+import java.io.IOException;
 
 public class CameraView extends ViewGroup implements
     Camera.PictureCallback {
@@ -235,6 +237,7 @@ public class CameraView extends ViewGroup implements
 
   @Override
   public void onPictureTaken(byte[] data, Camera camera) {
+    getHost().pictureTaken();
     camera.setParameters(previewParams);
 
     if (data != null) {

@@ -213,6 +213,10 @@ public class CameraFragment extends Fragment {
     return(cameraView.isAutoFocusAvailable());
   }
 
+  public void previewReset() {
+    cameraView.previewReset(cameraView.getWidth(), cameraView.getHeight());
+  }
+
   /**
    * If you are in single-shot mode and are done processing
    * a previous picture, call this to restart the camera
