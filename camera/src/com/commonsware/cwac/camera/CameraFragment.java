@@ -213,8 +213,12 @@ public class CameraFragment extends Fragment {
     return(cameraView.isAutoFocusAvailable());
   }
 
-  public void previewReset() {
-    cameraView.previewReset(cameraView.getWidth(), cameraView.getHeight());
+  /**
+   * Stops the camera preview (if needed) and re-initializes the
+   * camera preview with any new parameters from adjustPreviewParameters().
+   */
+  public void reinitializePreview() {
+    cameraView.reinitializePreview();
   }
 
   /**

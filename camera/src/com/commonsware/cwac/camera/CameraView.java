@@ -100,32 +100,7 @@ public class CameraView extends ViewGroup implements
   public void onResume() {
     addView(previewStrategy.getWidget());
 
-    if (camera == null) {
-      cameraId=getHost().getCameraId();
-
-      if (cameraId >= 0) {
-        try {
-          camera=Camera.open(cameraId);
-
-          if (getActivity().getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
-            onOrientationChange.enable();
-          }
-
-          setCameraDisplayOrientation(cameraId, camera);
-
-          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH
-              && getHost() instanceof Camera.FaceDetectionListener) {
-            camera.setFaceDetectionListener((Camera.FaceDetectionListener)getHost());
-          }
-        }
-        catch (Exception e) {
-          getHost().onCameraFail(FailureReason.UNKNOWN);
-        }
-      }
-      else {
-        getHost().onCameraFail(FailureReason.NO_CAMERAS_REPORTED);
-      }
-    }
+    initCamera();
   }
 
   public void onPause() {
@@ -249,6 +224,46 @@ public class CameraView extends ViewGroup implements
     if (!getHost().useSingleShotMode()) {
       startPreview();
     }
+  }
+
+  private void initCamera() {
+      if (camera == null) {
+          cameraId=getHost().getCameraId();
+
+          if (cameraId >= 0) {
+              try {
+                  camera=Camera.open(cameraId);
+
+                  if (getActivity().getRequestedOrientation() != ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+                      onOrientationChange.enable();
+                  }
+
+                  setCameraDisplayOrientation(cameraId, camera);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH
+                          && getHost() instanceof Camera.FaceDetectionListener) {
+                      camera.setFaceDetectionListener((Camera.FaceDetectionListener)getHost());
+                  }
+              }
+              catch (Exception e) {
+                  getHost().onCameraFail(FailureReason.UNKNOWN);
+              }
+          }
+          else {
+              getHost().onCameraFail(FailureReason.NO_CAMERAS_REPORTED);
+          }
+      }
+  }
+
+  public void reinitializePreview() {
+    // Release the camera and stop the preview
+    previewDestroyed();
+    // Get a new reference to the camera
+    initCamera();
+    // Rebind the camera to the rendering surface
+    previewCreated();
+    // Reset the camera's parameters and start the preview
+    previewReset(this.getWidth(), this.getHeight());
   }
 
   public void restartPreview() {
