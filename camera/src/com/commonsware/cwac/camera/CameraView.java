@@ -87,6 +87,9 @@ public class CameraView extends ViewGroup implements
 
   public void setHost(CameraHost host) {
     this.host=host;
+    if (camera != null) {
+        this.host.onCheckFlashSupport(CameraUtils.deviceSupportsFlash(camera.getParameters()));
+    }
 
     if (host.getDeviceProfile().useTextureView()) {
       previewStrategy=new TexturePreviewStrategy(this);
@@ -244,6 +247,7 @@ public class CameraView extends ViewGroup implements
                           && getHost() instanceof Camera.FaceDetectionListener) {
                       camera.setFaceDetectionListener((Camera.FaceDetectionListener)getHost());
                   }
+                  getHost().onCheckFlashSupport(CameraUtils.deviceSupportsFlash(camera.getParameters()));
               }
               catch (Exception e) {
                   getHost().onCameraFail(FailureReason.UNKNOWN);
@@ -270,6 +274,14 @@ public class CameraView extends ViewGroup implements
     if (!inPreview) {
       startPreview();
     }
+  }
+
+  public void setFlashMode(String flashMode) {
+      if (camera != null) {
+          Camera.Parameters pictureParams=camera.getParameters();
+          pictureParams.setFlashMode(flashMode);
+          camera.setParameters(getHost().adjustPictureParameters(pictureParams));
+      }
   }
 
   public void takePicture(boolean needBitmap, boolean needByteArray) {

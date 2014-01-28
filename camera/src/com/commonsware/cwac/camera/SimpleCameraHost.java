@@ -244,6 +244,11 @@ public class SimpleCameraHost implements CameraHost {
           String.format("Camera access failed: %d", reason.value));
   }
 
+  @Override
+  public void onCheckFlashSupport(boolean supportsFlash) {
+      // no-op
+  }
+
   protected File getPhotoPath() {
     File dir=getPhotoDirectory();
 

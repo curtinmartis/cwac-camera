@@ -116,6 +116,10 @@ public class CameraFragment extends Fragment {
     this.host=host;
   }
 
+  public void setFlashMode(String flashMode) {
+      cameraView.setFlashMode(flashMode);
+  }
+
   /**
    * Call this to take a picture and get access to a byte
    * array of data as a result (e.g., to save or stream).

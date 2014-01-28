@@ -284,4 +284,11 @@ public interface CameraHost extends Camera.AutoFocusCallback {
    *          a FailureReason indicating what went wrong
    */
   void onCameraFail(FailureReason reason);
+
+  /**
+   * Called after the camera has been initialized to indicate whether the
+   * device supports flash.
+   * @param supportsFlash whether the device supports camera flash
+   */
+  void onCheckFlashSupport(boolean supportsFlash);
 }
