@@ -291,4 +291,6 @@ public interface CameraHost extends Camera.AutoFocusCallback {
    * @param supportsFlash whether the device supports camera flash
    */
   void onCheckFlashSupport(boolean supportsFlash);
+  
+  boolean useFullBleedPreview();
 }
