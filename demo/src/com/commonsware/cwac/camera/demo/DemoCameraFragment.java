@@ -34,7 +34,9 @@ import android.widget.SeekBar.OnSeekBarChangeListener;
 import android.widget.Toast;
 import com.commonsware.cwac.camera.CameraFragment;
 import com.commonsware.cwac.camera.CameraHost;
+import com.commonsware.cwac.camera.CameraUtils;
 import com.commonsware.cwac.camera.SimpleCameraHost;
+import com.commonsware.cwac.camera.PictureTransaction;
 
 public class DemoCameraFragment extends CameraFragment implements
     OnSeekBarChangeListener {
@@ -43,9 +45,13 @@ public class DemoCameraFragment extends CameraFragment implements
   private MenuItem singleShotItem=null;
   private MenuItem autoFocusItem=null;
   private MenuItem takePictureItem=null;
+  private MenuItem flashItem=null;
+  private MenuItem recordItem=null;
+  private MenuItem stopRecordItem=null;
   private boolean singleShotProcessing=false;
   private SeekBar zoom=null;
   private long lastFaceToast=0L;
+  String flashMode=null;
 
   static DemoCameraFragment newInstance(boolean useFFC) {
     DemoCameraFragment f=new DemoCameraFragment();
@@ -62,7 +68,11 @@ public class DemoCameraFragment extends CameraFragment implements
     super.onCreate(state);
 
     setHasOptionsMenu(true);
-    setHost(new DemoCameraHost(getActivity()));
+
+    SimpleCameraHost.Builder builder=
+        new SimpleCameraHost.Builder(new DemoCameraHost(getActivity()));
+
+    setHost(builder.useFullBleedPreview(true).build());
   }
 
   @Override
@@ -75,23 +85,39 @@ public class DemoCameraFragment extends CameraFragment implements
 
     ((ViewGroup)results.findViewById(R.id.camera)).addView(cameraView);
     zoom=(SeekBar)results.findViewById(R.id.zoom);
+    zoom.setKeepScreenOn(true);
 
     return(results);
+  }
+  
+  @Override
+  public void onPause() {
+    super.onPause();
+    
+    getActivity().invalidateOptionsMenu();
   }
 
   @Override
   public void onCreateOptionsMenu(Menu menu, MenuInflater inflater) {
     inflater.inflate(R.menu.camera, menu);
 
-    if (isRecording()) {
-      menu.findItem(R.id.record).setVisible(false);
-      menu.findItem(R.id.stop).setVisible(true);
-    }
-
     takePictureItem=menu.findItem(R.id.camera);
     singleShotItem=menu.findItem(R.id.single_shot);
     singleShotItem.setChecked(getContract().isSingleShotMode());
     autoFocusItem=menu.findItem(R.id.autofocus);
+    flashItem=menu.findItem(R.id.flash);
+    recordItem=menu.findItem(R.id.record);
+    stopRecordItem=menu.findItem(R.id.stop);
+
+    if (isRecording()) {
+      recordItem.setVisible(false);
+      stopRecordItem.setVisible(true);
+      takePictureItem.setVisible(false);
+    }
+
+    if (getDisplayOrientation() != 0 && getDisplayOrientation() != 180) {
+      recordItem.setVisible(false);
+    }
   }
 
   @Override
@@ -103,7 +129,13 @@ public class DemoCameraFragment extends CameraFragment implements
           takePictureItem.setEnabled(false);
         }
 
-        takePicture();
+        PictureTransaction xact=new PictureTransaction(getHost());
+
+        if (flashItem.isChecked()) {
+          xact.flashMode(flashMode);
+        }
+
+        takePicture(xact);
 
         return(true);
 
@@ -150,6 +182,11 @@ public class DemoCameraFragment extends CameraFragment implements
       case R.id.show_zoom:
         item.setChecked(!item.isChecked());
         zoom.setVisibility(item.isChecked() ? View.VISIBLE : View.GONE);
+
+        return(true);
+
+      case R.id.flash:
+        item.setChecked(!item.isChecked());
 
         return(true);
     }
@@ -214,7 +251,7 @@ public class DemoCameraFragment extends CameraFragment implements
     }
 
     @Override
-    public void saveImage(byte[] image) {
+    public void saveImage(PictureTransaction xact, byte[] image) {
       if (useSingleShotMode()) {
         singleShotProcessing=false;
 
@@ -229,7 +266,7 @@ public class DemoCameraFragment extends CameraFragment implements
         startActivity(new Intent(getActivity(), DisplayActivity.class));
       }
       else {
-        super.saveImage(image);
+        super.saveImage(xact, image);
       }
     }
 
@@ -258,6 +295,12 @@ public class DemoCameraFragment extends CameraFragment implements
 
     @Override
     public Parameters adjustPreviewParameters(Parameters parameters) {
+      flashMode=
+          CameraUtils.findBestFlashModeMatch(parameters,
+                                             Camera.Parameters.FLASH_MODE_RED_EYE,
+                                             Camera.Parameters.FLASH_MODE_AUTO,
+                                             Camera.Parameters.FLASH_MODE_ON);
+
       if (doesZoomReallyWork() && parameters.getMaxZoom() > 0) {
         zoom.setMax(parameters.getMaxZoom());
         zoom.setOnSeekBarChangeListener(DemoCameraFragment.this);

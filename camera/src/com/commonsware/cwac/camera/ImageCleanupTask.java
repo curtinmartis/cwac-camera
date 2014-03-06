@@ -1,37 +1,48 @@
+/***
+  Copyright (c) 2013-2014 CommonsWare, LLC
+  
+  Licensed under the Apache License, Version 2.0 (the "License"); you may
+  not use this file except in compliance with the License. You may obtain
+  a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+ */
+
 package com.commonsware.cwac.camera;
 
+import android.annotation.TargetApi;
+import android.app.ActivityManager;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.hardware.Camera;
-import android.media.ExifInterface;
-import android.os.Environment;
+import android.os.Build;
 import android.util.Log;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import com.android.mms.exif.ExifInterface;
 
 public class ImageCleanupTask extends Thread {
   private byte[] data;
-  private Bitmap workingCopy=null;
   private int cameraId;
-  private CameraHost host;
-  private File cacheDir=null;
-  private boolean needBitmap=false;
-  private boolean needByteArray=false;
-  private int displayOrientation;
+  private PictureTransaction xact=null;
+  private boolean applyMatrix=true;
 
-  ImageCleanupTask(byte[] data, int cameraId, CameraHost host,
-                   File cacheDir, boolean needBitmap,
-                   boolean needByteArray, int displayOrientation) {
+  ImageCleanupTask(Context ctxt, byte[] data, int cameraId,
+                   PictureTransaction xact) {
     this.data=data;
     this.cameraId=cameraId;
-    this.host=host;
-    this.cacheDir=cacheDir;
-    this.needBitmap=needBitmap;
-    this.needByteArray=needByteArray;
-    this.displayOrientation=displayOrientation;
+    this.xact=xact;
+
+    float heapPct=(float)data.length / calculateHeapSize(ctxt);
+
+    applyMatrix=(heapPct < xact.host.maxPictureCleanupHeapUsage());
   }
 
   @Override
@@ -40,169 +51,165 @@ public class ImageCleanupTask extends Thread {
 
     Camera.getCameraInfo(cameraId, info);
 
-    if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-      if (host.getDeviceProfile().portraitFFCFlipped()
-          && (displayOrientation == 90 || displayOrientation == 270)) {
-        applyFlip();
-      }
-      else if (host.mirrorFFC()) {
-        applyMirror();
-      }
-    }
+    Matrix matrix=null;
+    Bitmap cleaned=null;
+    ExifInterface exif=null;
 
-    if (host.rotateBasedOnExif()
-        && host.getDeviceProfile().encodesRotationToExif()) {
-      rotateForRealz();
-    }
-
-    synchronizeModels(needBitmap, needByteArray);
-
-    if (needBitmap) {
-      host.saveImage(workingCopy);
-    }
-    else if (workingCopy != null) {
-      workingCopy.recycle();
-    }
-
-    if (needByteArray) {
-      host.saveImage(data);
-    }
-  }
-
-  void applyMirror() {
-    synchronizeModels(true, false);
-
-    // from http://stackoverflow.com/a/8347956/115145
-
-    float[] mirrorY= { -1, 0, 0, 0, 1, 0, 0, 0, 1 };
-    Matrix matrix=new Matrix();
-    Matrix matrixMirrorY=new Matrix();
-
-    matrixMirrorY.setValues(mirrorY);
-    matrix.postConcat(matrixMirrorY);
-
-    Bitmap mirrored=
-        Bitmap.createBitmap(workingCopy, 0, 0, workingCopy.getWidth(),
-                            workingCopy.getHeight(), matrix, true);
-
-    workingCopy.recycle();
-    workingCopy=mirrored;
-    data=null;
-  }
-
-  void applyFlip() {
-    synchronizeModels(true, false);
-
-    float[] mirrorY= { -1, 0, 0, 0, 1, 0, 0, 0, 1 };
-    Matrix matrix=new Matrix();
-    Matrix matrixMirrorY=new Matrix();
-
-    matrixMirrorY.setValues(mirrorY);
-    matrix.preScale(1.0f, -1.0f);
-    matrix.postConcat(matrixMirrorY);
-
-    Bitmap flipped=
-        Bitmap.createBitmap(workingCopy, 0, 0, workingCopy.getWidth(),
-                            workingCopy.getHeight(), matrix, true);
-
-    workingCopy.recycle();
-    workingCopy=flipped;
-    data=null;
-  }
-
-  void rotateForRealz() {
-    try {
-      synchronizeModels(true, true);
-
-      File dcim=new File(cacheDir, Environment.DIRECTORY_DCIM);
-
-      dcim.mkdirs();
-
-      File photo=new File(dcim, "photo.jpg");
-
-      if (photo.exists()) {
-        photo.delete();
+    if (applyMatrix) {
+      if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+        if (xact.host.getDeviceProfile().portraitFFCFlipped()
+            && (xact.displayOrientation == 90 || xact.displayOrientation == 270)) {
+          matrix=flip(new Matrix());
+        }
+        else if (xact.mirrorFFC()) {
+          matrix=mirror(new Matrix());
+        }
       }
 
       try {
-        FileOutputStream fos=new FileOutputStream(photo.getPath());
+        int imageOrientation=0;
 
-        fos.write(data);
-        fos.close();
+        if (xact.host.getDeviceProfile().useDeviceOrientation()) {
+          imageOrientation=xact.displayOrientation;
+        }
+        else {
+          exif=new ExifInterface();
+          exif.readExif(data);
 
-        ExifInterface exif=new ExifInterface(photo.getAbsolutePath());
-        Bitmap rotated=null;
-        data=null;
+          Integer exifOrientation=
+              exif.getTagIntValue(ExifInterface.TAG_ORIENTATION);
 
-        try {
-          if ("6".equals(exif.getAttribute(ExifInterface.TAG_ORIENTATION))) {
-            rotated=rotate(workingCopy, 90);
-          }
-          else if ("8".equals(exif.getAttribute(ExifInterface.TAG_ORIENTATION))) {
-            rotated=rotate(workingCopy, 270);
-          }
-          else if ("3".equals(exif.getAttribute(ExifInterface.TAG_ORIENTATION))) {
-            rotated=rotate(workingCopy, 180);
-          }
-
-          if (rotated != null) {
-            workingCopy.recycle();
-            workingCopy=rotated;
+          if (exifOrientation != null) {
+            if (exifOrientation == 6) {
+              imageOrientation=90;
+            }
+            else if (exifOrientation == 8) {
+              imageOrientation=270;
+            }
+            else if (exifOrientation == 3) {
+              imageOrientation=180;
+            }
+            else if (exifOrientation == 1) {
+              imageOrientation=0;
+            }
+            else {
+              // imageOrientation=
+              // xact.host.getDeviceProfile().getDefaultOrientation();
+              //
+              // if (imageOrientation == -1) {
+              // imageOrientation=xact.displayOrientation;
+              // }
+            }
           }
         }
-        catch (OutOfMemoryError e) {
-          Log.e(CameraView.TAG, "OOM in rotate() call", e);
+
+        if (imageOrientation != 0) {
+          matrix=
+              rotate((matrix == null ? new Matrix() : matrix),
+                     imageOrientation);
         }
-        finally {
-          photo.delete();
-        }
-      }
-      catch (java.io.IOException e) {
-        Log.e(CameraView.TAG,
-              "Exception in saving photo in rotateForRealz()", e);
-      }
-    }
-    catch (OutOfMemoryError e) {
-      Log.e(CameraView.TAG, "OOM in synchronizeModels() call", e);
-    }
-  }
-
-  private static Bitmap rotate(Bitmap bitmap, int degree) {
-    Matrix mtx=new Matrix();
-
-    mtx.setRotate(degree);
-
-    return(Bitmap.createBitmap(bitmap, 0, 0, bitmap.getWidth(),
-                               bitmap.getHeight(), mtx, true));
-  }
-
-  private void synchronizeModels(boolean needBitmap,
-                                 boolean needByteArray) {
-    if (data == null && needByteArray) {
-      ByteArrayOutputStream out=
-          new ByteArrayOutputStream(workingCopy.getWidth()
-              * workingCopy.getHeight());
-
-      workingCopy.compress(Bitmap.CompressFormat.JPEG, 100, out);
-      data=out.toByteArray();
-
-      try {
-        out.close();
       }
       catch (IOException e) {
-        Log.e(CameraView.TAG, "Exception in closing a BAOS???", e);
+        Log.e("CWAC-Camera", "Exception parsing JPEG", e);
+        // TODO: ripple to client
+      }
+
+      if (matrix != null) {
+        Bitmap original=
+            BitmapFactory.decodeByteArray(data, 0, data.length);
+
+        cleaned=
+            Bitmap.createBitmap(original, 0, 0, original.getWidth(),
+                                original.getHeight(), matrix, true);
+        original.recycle();
       }
     }
 
-    if (workingCopy == null && needBitmap) {
-      workingCopy=BitmapFactory.decodeByteArray(data, 0, data.length);
+    if (xact.needBitmap) {
+      if (cleaned == null) {
+        cleaned=BitmapFactory.decodeByteArray(data, 0, data.length);
+      }
+
+      xact.host.saveImage(xact, cleaned);
     }
 
-    if (!needBitmap && workingCopy != null) {
-      workingCopy.recycle();
-      workingCopy=null;
+    if (xact.needByteArray) {
+      if (matrix != null) {
+        ByteArrayOutputStream out=new ByteArrayOutputStream();
+
+        // if (exif == null) {
+        cleaned.compress(Bitmap.CompressFormat.JPEG, 100, out);
+        // }
+        // else {
+        // exif.deleteTag(ExifInterface.TAG_ORIENTATION);
+        //
+        // try {
+        // exif.writeExif(cleaned, out);
+        // }
+        // catch (IOException e) {
+        // Log.e("CWAC-Camera", "Exception writing to JPEG",
+        // e);
+        // // TODO: ripple to client
+        // }
+        // }
+
+        data=out.toByteArray();
+
+        try {
+          out.close();
+        }
+        catch (IOException e) {
+          Log.e(CameraView.TAG, "Exception in closing a BAOS???", e);
+        }
+      }
+
+      xact.host.saveImage(xact, data);
     }
 
     System.gc();
+  }
+
+  // from http://stackoverflow.com/a/8347956/115145
+
+  private Matrix mirror(Matrix input) {
+    float[] mirrorY= { -1, 0, 0, 0, 1, 0, 0, 0, 1 };
+    Matrix matrixMirrorY=new Matrix();
+
+    matrixMirrorY.setValues(mirrorY);
+    input.postConcat(matrixMirrorY);
+
+    return(input);
+  }
+
+  private Matrix flip(Matrix input) {
+    float[] mirrorY= { -1, 0, 0, 0, 1, 0, 0, 0, 1 };
+    Matrix matrixMirrorY=new Matrix();
+
+    matrixMirrorY.setValues(mirrorY);
+    input.preScale(1.0f, -1.0f);
+    input.postConcat(matrixMirrorY);
+
+    return(input);
+  }
+
+  private Matrix rotate(Matrix input, int degree) {
+    input.setRotate(degree);
+
+    return(input);
+  }
+
+  @TargetApi(Build.VERSION_CODES.HONEYCOMB)
+  private static int calculateHeapSize(Context ctxt) {
+    ActivityManager am=
+        (ActivityManager)ctxt.getSystemService(Context.ACTIVITY_SERVICE);
+    int memoryClass=am.getMemoryClass();
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+      if ((ctxt.getApplicationInfo().flags & ApplicationInfo.FLAG_LARGE_HEAP) != 0) {
+        memoryClass=am.getLargeMemoryClass();
+      }
+    }
+
+    return(memoryClass * 1048576); // MB * bytes in MB
   }
 }

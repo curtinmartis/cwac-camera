@@ -1,15 +1,15 @@
 /***
-  Copyright (c) 2013 CommonsWare, LLC
-  
-  Licensed under the Apache License, Version 2.0 (the "License"); you may
-  not use this file except in compliance with the License. You may obtain
-  a copy of the License at
-    http://www.apache.org/licenses/LICENSE-2.0
-  Unless required by applicable law or agreed to in writing, software
-  distributed under the License is distributed on an "AS IS" BASIS,
-  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-  See the License for the specific language governing permissions and
-  limitations under the License.
+ Copyright (c) 2013 CommonsWare, LLC
+
+ Licensed under the Apache License, Version 2.0 (the "License"); you may
+ not use this file except in compliance with the License. You may obtain
+ a copy of the License at
+ http://www.apache.org/licenses/LICENSE-2.0
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS,
+ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ See the License for the specific language governing permissions and
+ limitations under the License.
  */
 
 package com.commonsware.cwac.camera;
@@ -33,270 +33,390 @@ import java.util.Date;
 import java.util.Locale;
 
 public class SimpleCameraHost implements CameraHost {
-  private static final String[] SCAN_TYPES= { "image/jpeg" };
-  private Context ctxt=null;
+    private static final String[] SCAN_TYPES= { "image/jpeg" };
+    private Context ctxt=null;
+    private int cameraId=-1;
+    private DeviceProfile profile=null;
+    private File photoDirectory=null;
+    private File videoDirectory=null;
+    private RecordingHint recordingHint=null;
+    private boolean mirrorFFC=false;
+    private boolean useFrontFacingCamera=false;
+    private boolean scanSavedImage=true;
+    private boolean useFullBleedPreview=true;
+    private boolean useSingleShotMode=false;
 
-  public SimpleCameraHost(Context _ctxt) {
-    this.ctxt=_ctxt.getApplicationContext();
-  }
+    public SimpleCameraHost(Context _ctxt) {
+        this.ctxt=_ctxt.getApplicationContext();
+    }
 
-  @Override
-  public Camera.Parameters adjustPictureParameters(Camera.Parameters parameters) {
-    return(parameters);
-  }
+    @Override
+    public Camera.Parameters adjustPictureParameters(PictureTransaction xact,
+                                                     Camera.Parameters parameters) {
+        return(parameters);
+    }
 
-  @Override
-  public Camera.Parameters adjustPreviewParameters(Camera.Parameters parameters) {
-    return(parameters);
-  }
+    @Override
+    public Camera.Parameters adjustPreviewParameters(Camera.Parameters parameters) {
+        return(parameters);
+    }
 
-  @Override
-  public void configureRecorderAudio(int cameraId,
-                                     MediaRecorder recorder) {
-    recorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
-  }
-
-  @Override
-  public void configureRecorderOutput(int cameraId,
-                                      MediaRecorder recorder) {
-    recorder.setOutputFile(getVideoPath().getAbsolutePath());
-  }
-
-  @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-  @Override
-  public void configureRecorderProfile(int cameraId,
+    @Override
+    public void configureRecorderAudio(int cameraId,
                                        MediaRecorder recorder) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB
-        || CamcorderProfile.hasProfile(cameraId,
-                                       CamcorderProfile.QUALITY_HIGH)) {
-      recorder.setProfile(CamcorderProfile.get(cameraId,
-                                               CamcorderProfile.QUALITY_HIGH));
+        recorder.setAudioSource(MediaRecorder.AudioSource.CAMCORDER);
     }
-    else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB
-        && CamcorderProfile.hasProfile(cameraId,
-                                       CamcorderProfile.QUALITY_LOW)) {
-      recorder.setProfile(CamcorderProfile.get(cameraId,
-                                               CamcorderProfile.QUALITY_LOW));
+
+    @Override
+    public void configureRecorderOutput(int cameraId,
+                                        MediaRecorder recorder) {
+        recorder.setOutputFile(getVideoPath().getAbsolutePath());
     }
-    else {
-      throw new IllegalStateException(
-                                      "cannot find valid CamcorderProfile");
-    }
-  }
 
-  @Override
-  public int getCameraId() {
-    int count=Camera.getNumberOfCameras();
-    int result=-1;
-
-    if (count > 0) {
-      result=0; // if we have a camera, default to this one
-
-      Camera.CameraInfo info=new Camera.CameraInfo();
-
-      for (int i=0; i < count; i++) {
-        Camera.getCameraInfo(i, info);
-
-        if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK
-            && !useFrontFacingCamera()) {
-          result=i;
-          break;
+    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
+    @Override
+    public void configureRecorderProfile(int cameraId,
+                                         MediaRecorder recorder) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.HONEYCOMB
+                || CamcorderProfile.hasProfile(cameraId,
+                CamcorderProfile.QUALITY_HIGH)) {
+            recorder.setProfile(CamcorderProfile.get(cameraId,
+                    CamcorderProfile.QUALITY_HIGH));
         }
-        else if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
-            && useFrontFacingCamera()) {
-          result=i;
-          break;
+        else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB
+                && CamcorderProfile.hasProfile(cameraId,
+                CamcorderProfile.QUALITY_LOW)) {
+            recorder.setProfile(CamcorderProfile.get(cameraId,
+                    CamcorderProfile.QUALITY_LOW));
         }
-      }
+        else {
+            throw new IllegalStateException(
+                    "cannot find valid CamcorderProfile");
+        }
     }
 
-    return(result);
-  }
+    @Override
+    public int getCameraId() {
+        if (cameraId == -1) {
+            initCameraId();
+        }
 
-  @Override
-  public DeviceProfile getDeviceProfile() {
-    return(DeviceProfile.getInstance());
-  }
-
-  @Override
-  public Camera.Size getPictureSize(Camera.Parameters parameters) {
-    return(CameraUtils.getLargestPictureSize(parameters));
-  }
-
-  @Override
-  public Camera.Size getPreviewSize(int displayOrientation, int width,
-                                    int height,
-                                    Camera.Parameters parameters) {
-    return(CameraUtils.getBestAspectPreviewSize(displayOrientation,
-                                                width, height,
-                                                parameters));
-  }
-
-  @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-  @Override
-  public Camera.Size getPreferredPreviewSizeForVideo(int displayOrientation,
-                                                     int width,
-                                                     int height,
-                                                     Camera.Parameters parameters,
-                                                     Camera.Size deviceHint) {
-    if (deviceHint != null) {
-      return(deviceHint);
+        return(cameraId);
     }
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
-      return(parameters.getPreferredPreviewSizeForVideo());
+    private void initCameraId() {
+        int count=Camera.getNumberOfCameras();
+        int result=-1;
+
+        if (count > 0) {
+            result=0; // if we have a camera, default to this one
+
+            Camera.CameraInfo info=new Camera.CameraInfo();
+
+            for (int i=0; i < count; i++) {
+                Camera.getCameraInfo(i, info);
+
+                if (info.facing == Camera.CameraInfo.CAMERA_FACING_BACK
+                        && !useFrontFacingCamera()) {
+                    result=i;
+                    break;
+                }
+                else if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT
+                        && useFrontFacingCamera()) {
+                    result=i;
+                    break;
+                }
+            }
+        }
+
+        cameraId=result;
     }
 
-    return(null);
-  }
+    @Override
+    public DeviceProfile getDeviceProfile() {
+        if (profile == null) {
+            initDeviceProfile(ctxt);
+        }
 
-  @Override
-  public Camera.ShutterCallback getShutterCallback() {
-    return(null);
-  }
-
-  @Override
-  public void handleException(Exception e) {
-    Log.e(getClass().getSimpleName(),
-          "Exception in setPreviewDisplay()", e);
-  }
-
-  @Override
-  public boolean mirrorFFC() {
-    return(false);
-  }
-
-  @Override
-  public void pictureTaken() {
-      // no-op
-  }
-
-  @Override
-  public void saveImage(Bitmap bitmap) {
-    // no-op
-  }
-
-  @Override
-  public void saveImage(byte[] image) {
-    File photo=getPhotoPath();
-
-    if (photo.exists()) {
-      photo.delete();
+        return(profile);
     }
 
-    try {
-      FileOutputStream fos=new FileOutputStream(photo.getPath());
-      BufferedOutputStream bos=new BufferedOutputStream(fos);
-
-      bos.write(image);
-      bos.flush();
-      fos.getFD().sync();
-      bos.close();
-
-      if (scanSavedImage()) {
-        MediaScannerConnection.scanFile(ctxt,
-                                        new String[] { photo.getPath() },
-                                        SCAN_TYPES, null);
-      }
+    private void initDeviceProfile(Context ctxt) {
+        profile=DeviceProfile.getInstance(ctxt);
     }
-    catch (java.io.IOException e) {
-      handleException(e);
+
+    @Override
+    public Camera.Size getPictureSize(PictureTransaction xact,
+                                      Camera.Parameters parameters) {
+        return(CameraUtils.getLargestPictureSize(this, parameters));
     }
-  }
 
-  @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
-  @Override
-  public void onAutoFocus(boolean success, Camera camera) {
-    if (success
-        && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
-      new MediaActionSound().play(MediaActionSound.FOCUS_COMPLETE);
+    @Override
+    public Camera.Size getPreviewSize(int displayOrientation, int width,
+                                      int height,
+                                      Camera.Parameters parameters) {
+        return(CameraUtils.getBestAspectPreviewSize(displayOrientation,
+                width, height,
+                parameters));
     }
-  }
 
-  @Override
-  public boolean useSingleShotMode() {
-    return(false);
-  }
+    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
+    @Override
+    public Camera.Size getPreferredPreviewSizeForVideo(int displayOrientation,
+                                                       int width,
+                                                       int height,
+                                                       Camera.Parameters parameters,
+                                                       Camera.Size deviceHint) {
+        if (deviceHint != null) {
+            return(deviceHint);
+        }
 
-  @Override
-  public void autoFocusAvailable() {
-    // no-op
-  }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+            return(parameters.getPreferredPreviewSizeForVideo());
+        }
 
-  @Override
-  public void autoFocusUnavailable() {
-    // no-op
-  }
+        return(null);
+    }
 
-  @Override
-  public boolean rotateBasedOnExif() {
-    return(true);
-  }
+    @Override
+    public Camera.ShutterCallback getShutterCallback() {
+        return(null);
+    }
 
-  @Override
-  public RecordingHint getRecordingHint() {
-    return(RecordingHint.ANY);
-  }
+    @Override
+    public void handleException(Exception e) {
+        Log.e(getClass().getSimpleName(),
+                "Exception in setPreviewDisplay()", e);
+    }
 
-  @Override
-  public void onCameraFail(FailureReason reason) {
-    Log.e("CWAC-Camera",
-          String.format("Camera access failed: %d", reason.value));
-  }
-  
-  @Override
-  public boolean useFullBleedPreview() {
-    return(false);
-  }
+    @Override
+    public boolean mirrorFFC() {
+        return(mirrorFFC);
+    }
 
-  @Override
-  public void onCheckFlashSupport(boolean supportsFlash) {
-      // no-op
-  }
+    @Override
+    public void saveImage(PictureTransaction xact, Bitmap bitmap) {
+        // no-op
+    }
 
-  protected File getPhotoPath() {
-    File dir=getPhotoDirectory();
+    @Override
+    public void saveImage(PictureTransaction xact, byte[] image) {
+        File photo=getPhotoPath();
 
-    dir.mkdirs();
+        if (photo.exists()) {
+            photo.delete();
+        }
 
-    return(new File(dir, getPhotoFilename()));
-  }
+        try {
+            FileOutputStream fos=new FileOutputStream(photo.getPath());
+            BufferedOutputStream bos=new BufferedOutputStream(fos);
 
-  protected File getPhotoDirectory() {
-    return(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM));
-  }
+            bos.write(image);
+            bos.flush();
+            fos.getFD().sync();
+            bos.close();
 
-  protected String getPhotoFilename() {
-    String ts=
-        new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+            if (scanSavedImage()) {
+                MediaScannerConnection.scanFile(ctxt,
+                        new String[] { photo.getPath() },
+                        SCAN_TYPES, null);
+            }
+        }
+        catch (java.io.IOException e) {
+            handleException(e);
+        }
+    }
 
-    return("Photo_" + ts + ".jpg");
-  }
+    @TargetApi(Build.VERSION_CODES.JELLY_BEAN)
+    @Override
+    public void onAutoFocus(boolean success, Camera camera) {
+        if (success
+                && Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            new MediaActionSound().play(MediaActionSound.FOCUS_COMPLETE);
+        }
+    }
 
-  protected File getVideoPath() {
-    File dir=getVideoDirectory();
+    @Override
+    public boolean useSingleShotMode() {
+        return(useSingleShotMode);
+    }
 
-    dir.mkdirs();
+    @Override
+    public void autoFocusAvailable() {
+        // no-op
+    }
 
-    return(new File(dir, getVideoFilename()));
-  }
+    @Override
+    public void autoFocusUnavailable() {
+        // no-op
+    }
 
-  protected File getVideoDirectory() {
-    return(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES));
-  }
+    @Override
+    public RecordingHint getRecordingHint() {
+        if (recordingHint == null) {
+            initRecordingHint();
+        }
 
-  protected String getVideoFilename() {
-    String ts=
-        new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+        return(recordingHint);
+    }
 
-    return("Video_" + ts + ".mp4");
-  }
+    private void initRecordingHint() {
+        recordingHint=RecordingHint.ANY;
+    }
 
-  protected boolean useFrontFacingCamera() {
-    return(false);
-  }
+    @Override
+    public void onCameraFail(FailureReason reason) {
+        Log.e("CWAC-Camera",
+                String.format("Camera access failed: %d", reason.value));
+    }
 
-  protected boolean scanSavedImage() {
-    return(true);
-  }
+    @Override
+    public boolean useFullBleedPreview() {
+        return(useFullBleedPreview);
+    }
+
+    @Override
+    public float maxPictureCleanupHeapUsage() {
+        return(1.0f);
+    }
+
+    protected File getPhotoPath() {
+        File dir=getPhotoDirectory();
+
+        dir.mkdirs();
+
+        return(new File(dir, getPhotoFilename()));
+    }
+
+    protected File getPhotoDirectory() {
+        if (photoDirectory == null) {
+            initPhotoDirectory();
+        }
+
+        return(photoDirectory);
+    }
+
+    private void initPhotoDirectory() {
+        photoDirectory=
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM);
+    }
+
+    protected String getPhotoFilename() {
+        String ts=
+                new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+
+        return("Photo_" + ts + ".jpg");
+    }
+
+    protected File getVideoPath() {
+        File dir=getVideoDirectory();
+
+        dir.mkdirs();
+
+        return(new File(dir, getVideoFilename()));
+    }
+
+    protected File getVideoDirectory() {
+        if (videoDirectory == null) {
+            initVideoDirectory();
+        }
+
+        return(videoDirectory);
+    }
+
+    private void initVideoDirectory() {
+        videoDirectory=
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES);
+    }
+
+    protected String getVideoFilename() {
+        String ts=
+                new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
+
+        return("Video_" + ts + ".mp4");
+    }
+
+    protected boolean useFrontFacingCamera() {
+        return(useFrontFacingCamera);
+    }
+
+    protected boolean scanSavedImage() {
+        return(scanSavedImage);
+    }
+
+    public static class Builder {
+        private SimpleCameraHost host=null;
+
+        public Builder(Context ctxt) {
+            this(new SimpleCameraHost(ctxt));
+        }
+
+        public Builder(SimpleCameraHost host) {
+            this.host=host;
+        }
+
+        public SimpleCameraHost build() {
+            return(host);
+        }
+
+        public Builder cameraId(int cameraId) {
+            host.cameraId=cameraId;
+
+            return(this);
+        }
+
+        public Builder deviceProfile(DeviceProfile profile) {
+            host.profile=profile;
+
+            return(this);
+        }
+
+        public Builder mirrorFFC(boolean mirrorFFC) {
+            host.mirrorFFC=mirrorFFC;
+
+            return(this);
+        }
+
+        public Builder photoDirectory(File photoDirectory) {
+            host.photoDirectory=photoDirectory;
+
+            return(this);
+        }
+
+        public Builder recordingHint(RecordingHint recordingHint) {
+            host.recordingHint=recordingHint;
+
+            return(this);
+        }
+
+        public Builder scanSavedImage(boolean scanSavedImage) {
+            host.scanSavedImage=scanSavedImage;
+
+            return(this);
+        }
+
+        public Builder useFrontFacingCamera(boolean useFrontFacingCamera) {
+            host.useFrontFacingCamera=useFrontFacingCamera;
+
+            return(this);
+        }
+
+        public Builder useFullBleedPreview(boolean useFullBleedPreview) {
+            host.useFullBleedPreview=useFullBleedPreview;
+
+            return(this);
+        }
+
+        public Builder useSingleShotMode(boolean useSingleShotMode) {
+            host.useSingleShotMode=useSingleShotMode;
+
+            return(this);
+        }
+
+        public Builder videoDirectory(File videoDirectory) {
+            host.videoDirectory=videoDirectory;
+
+            return(this);
+        }
+    }
 }
